@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>İnteraktif Sanat - Kusursuz Ayna</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: black;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        video {
+            display: none;
+        }
+    </style>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <video id="input_video" autoplay playsinline></video>
+    <canvas id="output_canvas"></canvas>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        const cutoutCanvas = document.createElement('canvas');
+        const cutoutCtx = cutoutCanvas.getContext('2d');
+
+        function onResults(results) {
+            const W = videoElement.videoWidth;
+            const H = videoElement.videoHeight;
+            
+            canvasElement.width = W;
+            canvasElement.height = H;
+            
+            if (cutoutCanvas.width !== W) {
+                cutoutCanvas.width = W;
+                cutoutCanvas.height = H;
+            }
+
+            // 1. ADIM: YUMUŞATILMIŞ KESİM (Sınırları düzeltme)
+            cutoutCtx.clearRect(0, 0, W, H);
+            
+            // Kenarların tırtıklı olmaması için maskeye 12 piksellik bir yumuşatma uyguluyoruz
+            cutoutCtx.filter = 'blur(12px)';
+            cutoutCtx.drawImage(results.segmentationMask, 0, 0, W, H);
+            cutoutCtx.filter = 'none'; // Sonraki adımlar için bulanıklığı kapatıyoruz
+            
+            cutoutCtx.globalCompositeOperation = 'source-in';
+            cutoutCtx.drawImage(results.image, 0, 0, W, H);
+            cutoutCtx.globalCompositeOperation = 'source-over';
+
+
+            // 2. ADIM: EKRANI SİYAH YAPMA
+            canvasCtx.globalCompositeOperation = 'source-over';
+            canvasCtx.fillStyle = 'black';
+            canvasCtx.fillRect(0, 0, W, H);
+
+
+            // 3. ADIM: İÇ İÇE GEÇEN BEDENLERİ ÇİZME
+            // Boyutu biraz daha büyüttük ki bedenler ekranın ortasını daha iyi doldursun
+            const scale = 0.58; 
+            const drawW = W * scale;
+            const drawH = H * scale;
+            
+            // --- NEGATİF BOŞLUK (BEDENLERİ YAKINLAŞTIRMA) ---
+            // Sayılar EKSİ olduğu için bedenler birbirinden uzaklaşmak yerine birbirinin içine girer.
+            // Eğer daha da iç içe girmelerini istersen -80'i -120 yapabilirsin.
+            const itmeX = -60; 
+            const itmeY = -30; 
+
+            const shiftX = (drawW / 2) + itmeX;
+            const shiftY = (drawH / 2) + itmeY;
+
+            const centerX = W / 2;
+            const centerY = H / 2;
+
+            // BEDENLER KESİŞTİĞİNDE ÇİZGİ BELLİ OLMASIN DİYE "SCREEN" (IŞIK) EFEKTİ
+            canvasCtx.globalCompositeOperation = 'screen';
+
+            function drawClone(x, y, flipX, flipY) {
+                canvasCtx.save();
+                canvasCtx.translate(x, y); 
+                canvasCtx.scale(flipX, flipY); 
+                canvasCtx.drawImage(cutoutCanvas, -drawW/2, -drawH/2, drawW, drawH); 
+                canvasCtx.restore();
+            }
+
+            // 1. SOL ALT 
+            drawClone(centerX - shiftX, centerY + shiftY, 1, 1);
+
+            // 2. SAĞ ALT 
+            drawClone(centerX + shiftX, centerY + shiftY, -1, 1);
+
+            // 3. SOL ÜST 
+            drawClone(centerX - shiftX, centerY - shiftY, 1, -1);
+
+            // 4. SAĞ ÜST 
+            drawClone(centerX + shiftX, centerY - shiftY, -1, -1);
+        }
+
+        const selfieSegmentation = new SelfieSegmentation({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+        }});
+        
+        selfieSegmentation.setOptions({
+            modelSelection: 1, 
+        });
+        selfieSegmentation.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await selfieSegmentation.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
+    </script>
+
+</body>
+</html>
